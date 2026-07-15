@@ -52,6 +52,9 @@ pip install -r requirements.txt
 # Collect with KAPE (targets + modules in one pass)
 .\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
 
+# Full usage, no need to open this README or targets.md
+.\collection\run_kape.ps1 --help
+
 # Normalize KAPE's module (EZ Tools) CSV output
 python parsers/normalize_kape.py --input D:\triage\parsed\<run_folder> --output ./case001/normalized.csv --host HOSTNAME
 
