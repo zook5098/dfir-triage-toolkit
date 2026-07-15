@@ -41,23 +41,35 @@
 .PARAMETER KapePath
     Path to kape.exe. Defaults to "kape.exe", resolved via PATH.
 
+.PARAMETER Help
+    Show this help and exit. -h and --help are also recognized.
+
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
 
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive E: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
         -CaseName CASE-2026-014 -Targets RegistryHives,EventLogs -Modules RECmd,EvtxECmd
+
+.EXAMPLE
+    .\run_kape.ps1 --help
 #>
 
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
-    [Parameter(Mandatory = $true)]
+    # Catches a stray first bare token (e.g. a mistyped "--help", which
+    # PowerShell's parameter binder won't recognize as a named flag) so it
+    # can be handled below instead of silently binding to -SourceDrive.
+    [Parameter(Position = 0)]
+    [string]$FirstPositionalArg,
+
+    [Alias("h")]
+    [switch]$Help,
+
     [string]$SourceDrive,
 
-    [Parameter(Mandatory = $true)]
     [string]$TargetDestination,
 
-    [Parameter(Mandatory = $true)]
     [string]$ModuleDestination,
 
     [string]$CaseName = $env:COMPUTERNAME,
@@ -83,6 +95,31 @@ param(
 
     [string]$KapePath = "kape.exe"
 )
+
+# Handle -Help/-h (native PowerShell binding) and the literal "--help"/"-h"/"/?"
+# tokens PowerShell's binder doesn't recognize as flags (it would otherwise
+# silently bind them positionally to -SourceDrive) before any validation runs,
+# so this never falls through to a parameter prompt or a real KAPE invocation.
+$helpTokens = @("--help", "-help", "-h", "/?", "help")
+if ($Help -or ($FirstPositionalArg -and $helpTokens -contains $FirstPositionalArg.ToLower())) {
+    Get-Help -Full $PSCommandPath
+    exit 0
+}
+if ($FirstPositionalArg) {
+    Write-Host "Unrecognized argument: '$FirstPositionalArg'. All options must be passed as named parameters, e.g. -SourceDrive C:" -ForegroundColor Red
+    Write-Host "Run '.\run_kape.ps1 -Help' for usage." -ForegroundColor Yellow
+    exit 1
+}
+
+$missingParams = @()
+if (-not $SourceDrive) { $missingParams += "-SourceDrive" }
+if (-not $TargetDestination) { $missingParams += "-TargetDestination" }
+if (-not $ModuleDestination) { $missingParams += "-ModuleDestination" }
+if ($missingParams.Count -gt 0) {
+    Write-Host "Missing required parameter(s): $($missingParams -join ', ')" -ForegroundColor Red
+    Write-Host "Run '.\run_kape.ps1 -Help' for usage." -ForegroundColor Yellow
+    exit 1
+}
 
 $ErrorActionPreference = "Stop"
 
