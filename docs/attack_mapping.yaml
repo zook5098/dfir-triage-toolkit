@@ -1,0 +1,31 @@
+# ATT&CK pattern-matching rules for the timeline builder.
+#
+# Each entry: if a normalized timeline row's `detail` field matches `pattern`
+# (case-insensitive substring or regex), tag the row with the listed
+# technique ID(s). This is intentionally simple (v1) — good enough to
+# surface likely-interesting rows to an analyst, not a full detection engine.
+#
+# Add rules as you build out parsers and encounter patterns worth flagging.
+# Keep this file as the single source of truth for "what looks suspicious"
+# so the logic isn't buried in Python.
+
+rules:
+  - technique: T1053.005 # Scheduled Task
+    pattern: "schtasks|Register-ScheduledTask"
+    artifact_types: [event_log, registry]
+
+  - technique: T1547.001 # Registry Run Keys / Startup Folder
+    pattern: "CurrentVersion\\\\Run"
+    artifact_types: [registry]
+
+  - technique: T1003 # OS Credential Dumping
+    pattern: "lsass|sekurlsa|procdump.*lsass"
+    artifact_types: [event_log, prefetch, amcache]
+
+  - technique: T1070.006 # Timestomping
+    pattern: "mft_timestamp_anomaly"
+    artifact_types: [mft]
+
+  - technique: T1021 # Remote Services / Lateral Movement
+    pattern: "logon_type_(3|10)|RDP|PsExec"
+    artifact_types: [event_log]

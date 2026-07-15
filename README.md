@@ -1,0 +1,90 @@
+# DFIR Triage Toolkit
+
+Automated collection, parsing, and timelining of Windows host artifacts for rapid incident response triage. Built to compress the "acquire → parse → timeline" phase of an investigation from hours to minutes on a live or imaged host.
+
+## Why this exists
+
+During an active incident, analysts lose time hand-running a dozen tools (KAPE, RegRipper, Eric Zimmerman's tools, log parsers) and manually stitching output into a coherent timeline. This toolkit wraps that workflow into a single pipeline: point it at a host or image, get a normalized, sortable super-timeline plus a triage summary highlighting the artifacts most relevant to common intrusion patterns (persistence, lateral movement, execution, credential access).
+
+Collection is handled by [KAPE](https://www.kroll.com/en/services/cyber-risk/incident-response-litigation-support/kroll-artifact-parser-extractor-kape) itself (a curated Target/Module set — see [collection/targets.md](collection/targets.md)), rather than custom-built collectors/parsers. This toolkit's own code starts one step later: normalizing KAPE's EZ Tools CSV output and building the timeline.
+
+## Architecture
+
+```
+collection/   -> run_kape.ps1 wraps KAPE with a curated Target/Module set for IR triage
+                 targets.md documents which KAPE Targets/Modules are used and why
+parsers/      -> normalize_kape.py reads KAPE's EZ Tools output CSVs (MFTECmd, PECmd,
+                 AppCompatCacheParser, RECmd, EvtxECmd, LECmd, ...) and normalizes them
+                 into a common schema
+timeline/     -> build_timeline.py merges normalized records, tags rows with ATT&CK
+                 techniques per docs/attack_mapping.yaml, and outputs a sorted timeline
+                 render_html.py renders that timeline into a self-contained HTML viewer
+samples/      -> timeline.csv + timeline.html show what a built timeline and
+                 its rendered viewer look like end to end
+docs/         -> methodology notes, ATT&CK mapping
+```
+
+## Artifacts covered (v1 scope)
+
+| Artifact | Source | What it reveals |
+|---|---|---|
+| Prefetch | `C:\Windows\Prefetch` | Program execution, run count, first/last run |
+| Windows Event Logs | Security, System, PowerShell, Sysmon | Auth events, service creation, script block logging |
+| MFT | `$MFT` | File creation/modification/deletion, timestomping detection |
+| Registry (Run keys, Services, UserAssist) | NTUSER.DAT, SYSTEM, SOFTWARE hives | Persistence, program execution history |
+| Amcache / Shimcache | AmCache.hve, SYSTEM hive | Execution evidence even after deletion |
+| Scheduled Tasks | `C:\Windows\System32\Tasks` | Persistence |
+
+## Pipeline
+
+1. **Collect** — `collection/run_kape.ps1` invokes KAPE (assumed installed and on PATH) against a live host or mounted image, collecting the Targets in `collection/targets.md` and running the matching EZ Tools Modules against them in a single pass.
+2. **Normalize** — `parsers/normalize_kape.py` reads every module's CSV output and normalizes it into a common schema: `timestamp, host, artifact_type, action, detail, source_file`.
+3. **Timeline** — `timeline/build_timeline.py` merges all normalized records, sorts by timestamp, and tags entries with likely ATT&CK techniques based on pattern rules in `docs/attack_mapping.yaml`.
+4. **Review** — `timeline/render_html.py` renders the timeline CSV into a single self-contained HTML file (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns — no server or external assets) for quick standalone review, or import the CSV into Timesketch directly.
+
+## Quick start
+
+```powershell
+git clone https://github.com/<you>/dfir-triage-toolkit
+cd dfir-triage-toolkit
+pip install -r requirements.txt
+
+# Collect with KAPE (targets + modules in one pass)
+.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
+
+# Normalize KAPE's module (EZ Tools) CSV output
+python parsers/normalize_kape.py --input D:\triage\parsed\<run_folder> --output ./case001/normalized.csv --host HOSTNAME
+
+# Build the tagged, sorted timeline
+python timeline/build_timeline.py --input ./case001/normalized.csv --output ./case001/timeline.csv
+
+# Render a standalone HTML viewer
+python timeline/render_html.py --input ./case001/timeline.csv --output ./case001/timeline.html --title "CASE001"
+```
+
+See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` output looks like, and open [samples/timeline.html](samples/timeline.html) in a browser to see the rendered viewer (search, filters, ATT&CK tagging) without running the pipeline yourself.
+
+## Roadmap
+
+- [x] KAPE-based collection wrapper (`collection/run_kape.ps1`)
+- [x] KAPE/EZ Tools CSV normalizer (`parsers/normalize_kape.py`)
+- [x] Timeline merge + ATT&CK tagging (`timeline/build_timeline.py`)
+- [x] Emit all MFTECmd timestamp events (created/modified/accessed/record-change)
+- [x] Per-MFT-entry timestomp detection heuristic (SI vs FN, tags `T1070.006` via `mft_timestamp_anomaly`)
+- [x] HTML timeline viewer (`timeline/render_html.py` — search, artifact filters, ATT&CK-tagged-only toggle, sortable columns)
+- [ ] Timesketch export format
+- [ ] Sample malicious dataset + walkthrough (docs/case_walkthrough.md)
+
+## Design principles
+
+- **Minimal footprint on live systems** — KAPE runs read-only against the source; no writes to the host beyond the configured output destinations.
+- **Chain of custody friendly** — KAPE logs what it collected and when; keep target/module output folders as the evidence record.
+- **Analyst-first output** — the timeline is designed to be read by a human under time pressure, not just machine-parsed.
+
+## Status
+
+Early build — collection, normalization, and timeline stages are scaffolded. See Roadmap above for current coverage.
+
+## License
+
+[MIT](LICENSE)
