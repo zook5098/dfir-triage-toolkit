@@ -44,6 +44,15 @@ docs/         -> methodology notes, ATT&CK mapping
 
 ## Quick start
 
+**Prerequisites:**
+
+- **Windows** — `run_kape.ps1` and KAPE itself are Windows-only. (The Python normalize/timeline/render steps are plain CSV/JSON processing and will run on any OS once you have KAPE's output — but collection itself needs Windows.)
+- **PowerShell** — Windows PowerShell 5.1+ or PowerShell 7+ (`pwsh`), to run `run_kape.ps1`.
+- **Administrator privileges** — KAPE requires an elevated shell to collect from a live host; it exits immediately without one.
+- **[KAPE](https://www.kroll.com/en/services/cyber-risk/incident-response-litigation-support/kroll-artifact-parser-extractor-kape)** — installed separately (free registration with Kroll required) and on `PATH`, or pass `-KapePath` to `run_kape.ps1`. Run KAPE's own updater (`Get-KAPEUpdate.ps1`, or gkape's "Update" button) at least once so its bundled EZ Tools binaries (MFTECmd, PECmd, etc.) and Target/Module definitions are actually present — a fresh KAPE download doesn't always have everything on first extract.
+- **Python 3.8+** and `pip`, for the normalize/timeline/render steps.
+- A source to collect from — the live machine itself (`-SourceDrive C:`), a mounted image, or a remote/UNC path KAPE can read.
+
 ```powershell
 git clone https://github.com/zook5098/dfir-triage-toolkit
 cd dfir-triage-toolkit
