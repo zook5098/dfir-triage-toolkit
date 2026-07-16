@@ -64,7 +64,7 @@
 
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive E: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
-        -CaseName CASE-2026-014 -Targets RegistryHives,EventLogs -Modules RECmd,EvtxECmd
+        -CaseName CASE-2026-014 -Targets RegistryHives,EventLogs -Modules RECmd_DFIRBatch,EvtxECmd
 
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
@@ -109,7 +109,7 @@ param(
         "MFTECmd",
         "PECmd",
         "AppCompatCacheParser",
-        "RECmd",
+        "RECmd_DFIRBatch",
         "EvtxECmd",
         "LECmd"
     ),
@@ -194,7 +194,11 @@ Write-Host "Modules       : $moduleList"
 Write-Host "Target output : $tdest"
 Write-Host "Module output : $mdest"
 
-$logPath = Join-Path $mdest "run_kape.log"
+# Deliberately a sibling of $mdest, not inside it: KAPE's --mflush clears
+# $mdest before running modules, and a transcript file held open inside
+# that same directory blocks the flush (KAPE then aborts the whole module
+# phase with "Could not flush module destination directory ... Exiting").
+$logPath = Join-Path $ModuleDestination "$runName.log"
 Start-Transcript -Path $logPath -Append | Out-Null
 
 try {
@@ -205,6 +209,14 @@ try {
 }
 finally {
     Stop-Transcript | Out-Null
+}
+
+# kape.exe can exit 0 even when the module phase failed outright (e.g. a
+# flush failure aborts before any module runs) or every module was skipped,
+# so a clean exit code alone isn't proof of useful output — check for it.
+$moduleOutputFiles = Get-ChildItem -Path $mdest -Recurse -File -ErrorAction SilentlyContinue
+if (-not $moduleOutputFiles) {
+    Write-Host "WARNING: kape.exe exited cleanly but $mdest contains no output files. Check $logPath for module errors (e.g. a bad module name, or a flush/permission failure)." -ForegroundColor Yellow
 }
 
 Write-Host "Done. Raw targets: $tdest"

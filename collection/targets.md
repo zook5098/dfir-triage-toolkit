@@ -28,7 +28,7 @@ folder.
 | `MFTECmd` | `$MFT`, `$J` (from `FileSystem`) | `mft` |
 | `PECmd` | Prefetch `.pf` files | `prefetch` |
 | `AppCompatCacheParser` | Shimcache (SYSTEM hive, from `RegistryHives`) | `shimcache` |
-| `RECmd` | Registry hives (Run keys, Services, UserAssist, etc., from `RegistryHives`) | `registry` |
+| `RECmd_DFIRBatch` | Registry hives via RECmd's `DFIRBatch.reb` batch (Run keys, Services, UserAssist, ASEPs, etc., from `RegistryHives`) | `registry` |
 | `EvtxECmd` | EVTX event logs (from `EventLogs`) | `event_log` |
 | `LECmd` | `.lnk` files (from `LNKFilesAndFolders`) | `lnk` |
 
@@ -42,9 +42,20 @@ separate second pass:
 kape.exe --tsource <SourceDrive> --tdest <TargetDestination> `
   --target RegistryHives,EventLogs,FileSystem,Prefetch,ScheduledTasks,Amcache,LNKFilesAndFolders `
   --mdest <ModuleDestination> `
-  --module MFTECmd,PECmd,AppCompatCacheParser,RECmd,EvtxECmd,LECmd `
+  --module MFTECmd,PECmd,AppCompatCacheParser,RECmd_DFIRBatch,EvtxECmd,LECmd `
   --mflush
 ```
+
+Module names are matched against your installed KAPE's actual `.mkape` catalog
+(`Modules\EZTools\...\*.mkape`, `Modules\Compound\*.mkape`) — they don't
+always match the underlying EZ Tools binary name. `RECmd` itself, for
+example, isn't a module; the closest match for a single comprehensive
+registry batch is `RECmd_DFIRBatch` (older KAPE versions shipped the same
+idea as `Kroll_Batch.reb` under a plain `RECmd` module — the batch file and
+module name were both renamed upstream). If a module gets skipped with
+"Module `<name>` not found," confirm the real name with `kape.exe --mlist`
+or by checking your `Modules` folder before assuming the target itself
+failed to collect.
 
 Both the target list and module list are override-able via `run_kape.ps1
 -Targets` / `-Modules` for scoped, one-off collections (e.g. registry-only).
