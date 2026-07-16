@@ -24,7 +24,10 @@ timeline/     -> build_timeline.py merges normalized records, tags rows with ATT
                  viewer/ is the index.html template + vendored sql.js (SQLite-in-WASM)
                  that build_db.py renders from -- the dashboard runs real indexed SQL
                  queries against the .db client-side, so review scales to however
-                 large a real timeline gets
+                 large a real timeline gets, up to a practical browser memory ceiling
+                 serve_db.py is an alternative for timeline.db files past that ceiling:
+                 a small local server (Python stdlib only) that queries the .db directly
+                 off disk with no size limit, paired with server_viewer/'s dashboard
 samples/      -> timeline.csv + dashboard/ show what a built timeline and its
                  exported dashboard look like end to end
 docs/         -> methodology notes, ATT&CK mapping
@@ -46,7 +49,7 @@ docs/         -> methodology notes, ATT&CK mapping
 1. **Collect** — `collection/run_kape.ps1` invokes KAPE (assumed installed and on PATH) against a live host or mounted image, collecting the Targets in `collection/targets.md` and running the matching EZ Tools Modules against them in a single pass.
 2. **Normalize** — `parsers/normalize_kape.py` reads every module's CSV output and normalizes it into a common schema: `timestamp, host, artifact_type, action, detail, source_file`.
 3. **Timeline** — `timeline/build_timeline.py` merges all normalized records, sorts by timestamp, and tags entries with likely ATT&CK techniques based on pattern rules in `docs/attack_mapping.yaml`.
-4. **Review** — `timeline/build_db.py` exports the timeline CSV into a SQLite database and renders a matching `index.html` dashboard — sql.js (SQLite compiled to WebAssembly) is inlined directly into that HTML, so the two output files (`timeline.db` + `index.html`) are all that's needed, no server required and no separate files to keep track of. The dashboard (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns, pagination) runs real SQL queries against the `.db` client-side, and only the current page of results is ever loaded into the browser, so it scales to real timelines with hundreds of thousands of rows. See [Dashboard notes](#dashboard-notes) below for a practical size ceiling. Or import the CSV into Timesketch directly.
+4. **Review** — `timeline/build_db.py` exports the timeline CSV into a SQLite database and renders a matching `index.html` dashboard — sql.js (SQLite compiled to WebAssembly) is inlined directly into that HTML, so the two output files (`timeline.db` + `index.html`) are all that's needed, no server required and no separate files to keep track of. The dashboard (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns, pagination) runs real SQL queries against the `.db` client-side, and only the current page of results is ever loaded into the browser, so it scales to real timelines with hundreds of thousands of rows. See [Dashboard notes](#dashboard-notes) below for a practical size ceiling and `timeline/serve_db.py`, the alternative for databases past it. Or import the CSV into Timesketch directly.
 
 ## Quick start
 
@@ -91,7 +94,15 @@ See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` ou
 ### Dashboard notes
 
 - **Opening directly (double-click) fully works** — sql.js's SQLite/WebAssembly engine is inlined into `index.html` itself specifically so it never needs to fetch anything to start, which sidesteps a real Chromium restriction (`file://` pages can't `fetch()` even their own bundled `.wasm` file).
-- **Practical size ceiling**: the dashboard loads the whole `.db` into browser memory (indexed SQL queries run against it client-side, but the file itself is read in full). In testing, the browser's own file-reading APIs throw past roughly 1.5GB read as a single chunk — worked around here by reading large files in slices — and allocating one contiguous in-memory buffer above roughly 2GB fails outright regardless. For a `timeline.db` past that range, the dashboard will show a clear error rather than hang or silently fail, but there's currently no workaround short of a different (streaming) viewer design. If your case is trending that large, consider a narrower `-Targets`/`-Modules` collection scope (see [collection/targets.md](collection/targets.md)) to keep the timeline itself smaller.
+- **Practical size ceiling**: the dashboard loads the whole `.db` into browser memory (indexed SQL queries run against it client-side, but the file itself is read in full). In testing, the browser's own file-reading APIs throw past roughly 1.5GB read as a single chunk — worked around here by reading large files in slices — and allocating one contiguous in-memory buffer above roughly 2GB fails outright regardless. Past that, the dashboard shows a clear error naming `serve_db.py` rather than hanging or failing silently.
+
+**For a `timeline.db` too large for that ceiling**, use the server-backed dashboard instead:
+
+```powershell
+python timeline/serve_db.py --db ./case001/dashboard/timeline.db
+```
+
+This queries the `.db` directly off disk with Python's stdlib `sqlite3` — no size ceiling at all, since it's never loaded into memory as a whole. Verified end-to-end against a synthetic 3.27GB / 5-million-row database (matching real-world scale): sub-100ms responses for filtering, sorting, and pagination throughout. Free-text search is the one tradeoff — with no index to use (`LIKE` with a leading wildcard can't use one), it's a full table scan, which took ~13 seconds at that scale in testing. That's slow but *correct* — it was a deliberate choice over faster indexed alternatives like SQLite FTS5, whose tokenized matching could silently miss a substring match a forensic search needs to catch. Narrowing by artifact-type filter first (fast, indexed) before searching free text will speed this up. `serve_db.py` binds to `127.0.0.1` only (not the network) and opens the database read-only, so it can never modify evidence.
 
 ## Roadmap
 
@@ -101,6 +112,7 @@ See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` ou
 - [x] Emit all MFTECmd timestamp events (created/modified/accessed/record-change)
 - [x] Per-MFT-entry timestomp detection heuristic (SI vs FN, tags `T1070.006` via `mft_timestamp_anomaly`)
 - [x] SQLite-backed timeline dashboard (`timeline/build_db.py` + `timeline/viewer/` — search, artifact filters, ATT&CK-tagged-only toggle, sortable columns, pagination; replaced an earlier single-file HTML viewer that embedded every row as inline JSON, which ran real collections out of browser memory)
+- [x] Server-backed dashboard for databases too large for the browser to load whole (`timeline/serve_db.py` + `timeline/server_viewer/` — same UI, queries SQLite directly off disk via a local Python stdlib server, no size ceiling; verified against a synthetic 3.27GB/5M-row database)
 - [ ] Timesketch export format
 - [ ] Sample malicious dataset + walkthrough (docs/case_walkthrough.md)
 

@@ -275,8 +275,9 @@
         `${file.name} is too large to load in this browser ` +
         `(${(file.size / (1024 * 1024)).toLocaleString()} MB).\nError: ${e.message || e}\n\n` +
         `This dashboard loads the whole database into browser memory, which has a hard ceiling ` +
-        `(commonly around 2GB, independent of how much RAM the machine has). A database this ` +
-        `large needs a different, streaming-capable viewer -- there's no workaround here.`
+        `(commonly around 2GB, independent of how much RAM the machine has). Use ` +
+        `timeline/serve_db.py instead for a database this large -- it queries the .db directly ` +
+        `off disk with no size ceiling: python timeline/serve_db.py --db ${file.name}`
       );
       return;
     }

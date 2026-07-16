@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DFIR Timeline Dashboard (server)</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #ffffff; --text: #1a1a1a; --muted: #6b7280;
+    --border: #e2e2e5; --accent: #2563eb; --tag-bg: #fee2e2; --tag-text: #991b1b;
+    --row-hover: #f0f4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15161a; --panel: #1d1e23; --text: #e6e6e8; --muted: #9098a4;
+      --border: #33343a; --accent: #6ea8fe; --tag-bg: #4a1d1d; --tag-text: #ffb4b4;
+      --row-hover: #23262f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13px;
+  }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  .meta { color: var(--muted); font-size: 12px; }
+
+  #loadFailure {
+    display: none; margin: 16px 20px; padding: 12px 14px; text-align: left;
+    background: var(--tag-bg); color: var(--tag-text); border-radius: 8px;
+    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+  }
+
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  #search {
+    flex: 1 1 260px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 13px;
+  }
+  .types { display: flex; flex-wrap: wrap; gap: 8px; }
+  .types label { display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; }
+  #attackOnly { display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .pagination { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .pagination button, .pagination select {
+    padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+  #pageIndicator { color: var(--muted); font-size: 12px; padding: 0 2px; }
+  #count { color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 49px; background: var(--panel); text-align: left; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap;
+    font-weight: 600; color: var(--muted);
+  }
+  thead th:hover { color: var(--text); }
+  thead th.sorted { color: var(--accent); }
+  tbody td {
+    padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top;
+    max-width: 480px; overflow-wrap: break-word;
+  }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.tagged { box-shadow: inset 3px 0 0 var(--tag-text); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+  .badge {
+    display: inline-block; background: var(--tag-bg); color: var(--tag-text);
+    border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 600;
+    margin: 1px 3px 1px 0; white-space: nowrap;
+  }
+  .source { color: var(--muted); font-size: 11px; }
+  #empty { display: none; padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="title">DFIR Timeline</h1>
+  <div class="meta" id="headerMeta">Loading&hellip;</div>
+</header>
+
+<div id="loadFailure"></div>
+
+<div class="controls">
+  <input id="search" type="text" placeholder="Search timestamp, host, action, detail, source, technique...">
+  <div class="types" id="typeFilters"></div>
+  <label id="attackOnly"><input type="checkbox" id="attackOnlyCheckbox"> ATT&amp;CK-tagged only</label>
+  <div class="pagination">
+    <button id="prevPage" title="Previous page">&larr;</button>
+    <span id="pageIndicator"></span>
+    <button id="nextPage" title="Next page">&rarr;</button>
+    <select id="pageSize" title="Rows per page">
+      <option value="100">100/page</option>
+      <option value="200" selected>200/page</option>
+      <option value="500">500/page</option>
+      <option value="1000">1000/page</option>
+    </select>
+  </div>
+  <span id="count"></span>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th data-key="timestamp">Timestamp</th>
+      <th data-key="host">Host</th>
+      <th data-key="artifact_type">Artifact</th>
+      <th data-key="action">Action</th>
+      <th data-key="detail">Detail</th>
+      <th data-key="attack_techniques">ATT&amp;CK</th>
+      <th data-key="source_file">Source</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="empty">No events match the current filters.</div>
+
+<script>
+  const ORDERABLE_COLUMNS = new Set(["timestamp", "host", "artifact_type", "action", "detail", "attack_techniques", "source_file"]);
+
+  let ALL_TYPES = [];
+  const state = {
+    search: "", types: new Set(), attackOnly: false,
+    sortKey: "timestamp", sortDir: 1, page: 0, pageSize: 200
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+  }
+
+  function showLoadFailure(message) {
+    const el = document.getElementById("loadFailure");
+    el.textContent = message;
+    el.style.display = "block";
+  }
+
+  async function api(path, params, signal) {
+    const url = new URL(path, window.location.origin);
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) url.searchParams.set(k, v);
+      });
+    }
+    const resp = await fetch(url, { signal });
+    const body = await resp.json();
+    if (!resp.ok) throw new Error(body.error || `Request to ${path} failed (${resp.status})`);
+    return body;
+  }
+
+  async function init() {
+    let meta, types;
+    try {
+      meta = await api("/api/meta");
+      types = await api("/api/artifact_types");
+    } catch (e) {
+      showLoadFailure(`Failed to load from the server: ${e.message || e}\n\nIs serve_db.py still running?`);
+      return;
+    }
+
+    document.getElementById("title").textContent = meta.title || "DFIR Timeline";
+    document.getElementById("headerMeta").textContent =
+      `Generated ${meta.generated_at || "?"} · ${meta.total_count || "?"} events · ${meta.tagged_count || "?"} ATT&CK-tagged`;
+
+    ALL_TYPES = types;
+    state.types = new Set(ALL_TYPES);
+
+    const typeFiltersEl = document.getElementById("typeFilters");
+    ALL_TYPES.forEach(t => {
+      const label = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = true; cb.dataset.type = t;
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.types.add(t); else state.types.delete(t);
+        state.page = 0;
+        render();
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(" " + t));
+      typeFiltersEl.appendChild(label);
+    });
+
+    document.getElementById("attackOnlyCheckbox").addEventListener("change", (e) => {
+      state.attackOnly = e.target.checked;
+      state.page = 0;
+      render();
+    });
+
+    let searchTimer = null;
+    document.getElementById("search").addEventListener("input", (e) => {
+      clearTimeout(searchTimer);
+      const value = e.target.value;
+      searchTimer = setTimeout(() => { state.search = value; state.page = 0; render(); }, 150);
+    });
+
+    document.querySelectorAll("thead th[data-key]").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.key;
+        if (state.sortKey === key) { state.sortDir *= -1; } else { state.sortKey = key; state.sortDir = 1; }
+        document.querySelectorAll("thead th").forEach(h => h.classList.remove("sorted"));
+        th.classList.add("sorted");
+        state.page = 0;
+        render();
+      });
+    });
+    document.querySelector('thead th[data-key="timestamp"]').classList.add("sorted");
+
+    document.getElementById("prevPage").addEventListener("click", () => { state.page -= 1; render(); });
+    document.getElementById("nextPage").addEventListener("click", () => { state.page += 1; render(); });
+    document.getElementById("pageSize").addEventListener("change", (e) => {
+      state.pageSize = parseInt(e.target.value, 10);
+      state.page = 0;
+      render();
+    });
+
+    render();
+  }
+
+  function queryParams() {
+    return {
+      search: state.search,
+      types: [...state.types].join(","),
+      attack_only: state.attackOnly ? "1" : "0",
+      sort: ORDERABLE_COLUMNS.has(state.sortKey) ? state.sortKey : "timestamp",
+      dir: state.sortDir === -1 ? "desc" : "asc",
+      page: state.page,
+      page_size: state.pageSize
+    };
+  }
+
+  // Every render is one query to the local server (sqlite3 querying the .db
+  // directly off disk) that returns just one page of rows -- unlike the
+  // sql.js dashboard, nothing about the database's total size is ever
+  // loaded into the browser (or into this page's own memory) at once.
+  //
+  // Free-text search has no index to use (a leading-wildcard LIKE can't use
+  // one), so it's a full table scan -- correct, but on a multi-GB timeline
+  // this can take several seconds. Rather than risk a faster-but-inexact
+  // match (e.g. FTS5's tokenized search, which could silently miss a
+  // substring match a forensic search needs to catch), a slow exact scan
+  // is cancelled and re-issued cleanly instead: currentRenderController
+  // aborts any still-in-flight request from a previous render() call, so
+  // typing ahead or clicking around while a slow search is running can
+  // never display stale/out-of-order results.
+  //
+  // Note this only stops the browser from waiting on the abandoned
+  // request -- serve_db.py's simple threaded server has no way to
+  // interrupt a query already in progress, so a slow search that gets
+  // superseded keeps scanning server-side until it finishes, and can
+  // delay a newer, otherwise-fast query queued behind it on the same
+  // machine. Bounded and self-resolving (never wrong, just briefly
+  // slower), not worth the complexity of true server-side cancellation.
+  let currentRenderController = null;
+
+  async function render() {
+    if (currentRenderController) currentRenderController.abort();
+    const controller = new AbortController();
+    currentRenderController = controller;
+
+    document.getElementById("count").textContent = "Loading…";
+
+    let data;
+    try {
+      data = await api("/api/events", queryParams(), controller.signal);
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      showLoadFailure(`Query failed: ${e.message || e}`);
+      return;
+    }
+
+    const pageCount = Math.max(1, Math.ceil(data.total / state.pageSize));
+    if (state.page >= pageCount) {
+      state.page = pageCount - 1;
+      try {
+        data = await api("/api/events", queryParams(), controller.signal);
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        showLoadFailure(`Query failed: ${e.message || e}`);
+        return;
+      }
+    }
+
+    if (controller !== currentRenderController) return; // superseded by a newer render() while awaiting
+
+    const tbody = document.getElementById("rows");
+    const empty = document.getElementById("empty");
+    const prevBtn = document.getElementById("prevPage");
+    const nextBtn = document.getElementById("nextPage");
+    const pageIndicator = document.getElementById("pageIndicator");
+
+    if (data.total === 0) {
+      tbody.innerHTML = "";
+      empty.style.display = "block";
+      document.getElementById("count").textContent = "Showing 0 matches";
+      pageIndicator.textContent = "Page 0 of 0";
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+      return;
+    }
+    empty.style.display = "none";
+
+    const offset = state.page * state.pageSize;
+    document.getElementById("count").textContent =
+      `Rows ${offset + 1}-${offset + data.rows.length} of ${data.total} matches`;
+    pageIndicator.textContent = `Page ${state.page + 1} of ${pageCount}`;
+    prevBtn.disabled = state.page === 0;
+    nextBtn.disabled = state.page >= pageCount - 1;
+
+    tbody.innerHTML = data.rows.map(row => {
+      const techniques = row.attack_techniques
+        ? row.attack_techniques.split(";").filter(Boolean).map(t => `<span class="badge">${escapeHtml(t)}</span>`).join("")
+        : "";
+      const tagged = row.attack_techniques ? "tagged" : "";
+      return `<tr class="${tagged}">
+        <td class="mono">${escapeHtml(row.timestamp)}</td>
+        <td>${escapeHtml(row.host)}</td>
+        <td>${escapeHtml(row.artifact_type)}</td>
+        <td>${escapeHtml(row.action)}</td>
+        <td>${escapeHtml(row.detail)}</td>
+        <td>${techniques}</td>
+        <td class="source" title="${escapeHtml(row.source_file)}">${escapeHtml(row.source_file)}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  init();
+</script>
+</body>
+</html>

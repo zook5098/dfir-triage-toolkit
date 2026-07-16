@@ -22,6 +22,15 @@ SQLite (via sql.js, SQLite compiled to WebAssembly) lets the dashboard run
 real indexed queries and only ever materialize one page of rows at a time,
 regardless of how large the timeline is.
 
+sql.js still loads the whole .db as one in-memory WASM buffer, though, so
+it has its own hard ceiling -- roughly 2GB, regardless of the machine's
+actual RAM (verified: Chromium fails to read a single File/Blob above
+~1.5GB, worked around here by reading in slices, and fails to allocate
+one contiguous buffer above ~2GB with no workaround). For a timeline.db
+past that size, use serve_db.py instead: it queries the .db directly off
+disk with Python's stdlib sqlite3, so there's no size ceiling tied to the
+database at all.
+
 Usage:
     python build_db.py --input timeline.csv --output ./case001/dashboard
     python build_db.py --input timeline.csv --output ./case001/dashboard --title "CASE-2026-014"
@@ -136,6 +145,10 @@ def main():
     print(f"Wrote {len(rows)} events ({tagged_count} ATT&CK-tagged) to {db_path}")
     print(f"Open {output_dir / 'index.html'} in a browser to view -- works opened directly, "
           f"or serve over local http:// to auto-load timeline.db without the file picker.")
+    if db_path.stat().st_size > 1_000_000_000:
+        print(f"Note: {db_path.name} is over 1GB -- if the dashboard can't load it "
+              f"(browsers have a ~2GB in-memory ceiling), use serve_db.py instead: "
+              f"python timeline/serve_db.py --db {db_path}")
 
 
 if __name__ == "__main__":
