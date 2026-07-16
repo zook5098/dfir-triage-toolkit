@@ -45,7 +45,7 @@ docs/         -> methodology notes, ATT&CK mapping
 ## Quick start
 
 ```powershell
-git clone https://github.com/<you>/dfir-triage-toolkit
+git clone https://github.com/zook5098/dfir-triage-toolkit
 cd dfir-triage-toolkit
 pip install -r requirements.txt
 
