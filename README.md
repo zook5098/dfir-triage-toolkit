@@ -50,10 +50,11 @@ cd dfir-triage-toolkit
 pip install -r requirements.txt
 
 # Collect with KAPE (targets + modules in one pass)
-.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
+# -CaseName should identify the subject system/case, not your own analysis machine
+.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed -CaseName CASE-2026-014
 
 # ...or collect with a KAPE built-in compound target instead of the curated set
-.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed -CompoundTarget SANS_Triage
+.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed -CaseName CASE-2026-014 -CompoundTarget SANS_Triage
 
 # Full usage, no need to open this README or targets.md
 .\collection\run_kape.ps1 --help

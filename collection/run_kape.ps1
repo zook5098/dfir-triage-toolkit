@@ -27,8 +27,13 @@
     created under this path.
 
 .PARAMETER CaseName
-    Case/incident identifier used in the output folder name. Defaults to
-    the local hostname.
+    Case/incident identifier used in the output folder name. Required —
+    deliberately has no default. This is meant to identify the subject
+    system being triaged, and the analyst's own machine (what
+    $env:COMPUTERNAME would resolve to) is very often a different machine
+    entirely once you're collecting from a mounted image or remote host;
+    defaulting to it risks silently mislabeling evidence with the wrong
+    hostname.
 
 .PARAMETER Targets
     Comma-separated list of KAPE !Targets to collect. Defaults to the
@@ -60,7 +65,7 @@
     Show this help and exit. -h and --help are also recognized.
 
 .EXAMPLE
-    .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
+    .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed -CaseName KAYLAPC
 
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive E: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
@@ -68,7 +73,7 @@
 
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
-        -CompoundTarget SANS_Triage
+        -CaseName KAYLAPC -CompoundTarget SANS_Triage
 
 .EXAMPLE
     .\run_kape.ps1 --help
@@ -91,7 +96,7 @@ param(
 
     [string]$ModuleDestination,
 
-    [string]$CaseName = $env:COMPUTERNAME,
+    [string]$CaseName,
 
     [string[]]$Targets = @(
         "RegistryHives",
@@ -136,6 +141,7 @@ $missingParams = @()
 if (-not $SourceDrive) { $missingParams += "-SourceDrive" }
 if (-not $TargetDestination) { $missingParams += "-TargetDestination" }
 if (-not $ModuleDestination) { $missingParams += "-ModuleDestination" }
+if (-not $CaseName) { $missingParams += "-CaseName" }
 if ($missingParams.Count -gt 0) {
     Write-Host "Missing required parameter(s): $($missingParams -join ', ')" -ForegroundColor Red
     Write-Host "Run '.\run_kape.ps1 -Help' for usage." -ForegroundColor Yellow
