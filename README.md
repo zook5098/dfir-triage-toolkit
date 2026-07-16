@@ -18,9 +18,13 @@ parsers/      -> normalize_kape.py reads KAPE's EZ Tools output CSVs (MFTECmd, P
                  into a common schema
 timeline/     -> build_timeline.py merges normalized records, tags rows with ATT&CK
                  techniques per docs/attack_mapping.yaml, and outputs a sorted timeline
-                 render_html.py renders that timeline into a self-contained HTML viewer
-samples/      -> timeline.csv + timeline.html show what a built timeline and
-                 its rendered viewer look like end to end
+                 build_db.py exports that timeline into a SQLite .db + copies the
+                 static dashboard (viewer/) alongside it into one output folder
+                 viewer/ is the dashboard itself: index.html + vendored sql.js
+                 (SQLite-in-WASM) run real indexed queries against the .db client-side,
+                 so review scales to however large a real timeline gets
+samples/      -> timeline.csv + dashboard/ show what a built timeline and its
+                 exported dashboard look like end to end
 docs/         -> methodology notes, ATT&CK mapping
 ```
 
@@ -40,17 +44,17 @@ docs/         -> methodology notes, ATT&CK mapping
 1. **Collect** — `collection/run_kape.ps1` invokes KAPE (assumed installed and on PATH) against a live host or mounted image, collecting the Targets in `collection/targets.md` and running the matching EZ Tools Modules against them in a single pass.
 2. **Normalize** — `parsers/normalize_kape.py` reads every module's CSV output and normalizes it into a common schema: `timestamp, host, artifact_type, action, detail, source_file`.
 3. **Timeline** — `timeline/build_timeline.py` merges all normalized records, sorts by timestamp, and tags entries with likely ATT&CK techniques based on pattern rules in `docs/attack_mapping.yaml`.
-4. **Review** — `timeline/render_html.py` renders the timeline CSV into a single self-contained HTML file (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns — no server or external assets) for quick standalone review, or import the CSV into Timesketch directly.
+4. **Review** — `timeline/build_db.py` exports the timeline CSV into a SQLite database and copies the static dashboard (`timeline/viewer/`) alongside it, producing one self-contained folder to hand off. The dashboard (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns, pagination) runs real SQL queries against the `.db` client-side via a vendored copy of [sql.js](https://github.com/sql-js/sql.js) — no server required, and only the current page of results is ever loaded into the browser, so it scales to real timelines with hundreds of thousands of rows. Or import the CSV into Timesketch directly.
 
 ## Quick start
 
 **Prerequisites:**
 
-- **Windows** — `run_kape.ps1` and KAPE itself are Windows-only. (The Python normalize/timeline/render steps are plain CSV/JSON processing and will run on any OS once you have KAPE's output — but collection itself needs Windows.)
+- **Windows** — `run_kape.ps1` and KAPE itself are Windows-only. (The Python normalize/timeline/export steps are plain CSV/SQLite processing and will run on any OS once you have KAPE's output — but collection itself needs Windows.)
 - **PowerShell** — Windows PowerShell 5.1+ or PowerShell 7+ (`pwsh`), to run `run_kape.ps1`.
 - **Administrator privileges** — KAPE requires an elevated shell to collect from a live host; it exits immediately without one.
 - **[KAPE](https://www.kroll.com/en/services/cyber-risk/incident-response-litigation-support/kroll-artifact-parser-extractor-kape)** — installed separately (free registration with Kroll required) and on `PATH`, or pass `-KapePath` to `run_kape.ps1`. Run KAPE's own updater (`Get-KAPEUpdate.ps1`, or gkape's "Update" button) at least once so its bundled EZ Tools binaries (MFTECmd, PECmd, etc.) and Target/Module definitions are actually present — a fresh KAPE download doesn't always have everything on first extract.
-- **Python 3.8+** and `pip`, for the normalize/timeline/render steps.
+- **Python 3.8+** and `pip`, for the normalize/timeline/export steps.
 - A source to collect from — the live machine itself (`-SourceDrive C:`), a mounted image, or a remote/UNC path KAPE can read.
 
 ```powershell
@@ -74,11 +78,13 @@ python parsers/normalize_kape.py --input D:\triage\parsed\<run_folder> --output 
 # Build the tagged, sorted timeline
 python timeline/build_timeline.py --input ./case001/normalized.csv --output ./case001/timeline.csv
 
-# Render a standalone HTML viewer
-python timeline/render_html.py --input ./case001/timeline.csv --output ./case001/timeline.html --title "CASE001"
+# Export to a SQLite database + copy the dashboard alongside it
+python timeline/build_db.py --input ./case001/timeline.csv --output ./case001/dashboard --title "CASE001"
 ```
 
-See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` output looks like, and open [samples/timeline.html](samples/timeline.html) in a browser to see the rendered viewer (search, filters, ATT&CK tagging) without running the pipeline yourself.
+Open `./case001/dashboard/index.html` in a browser — it auto-loads `timeline.db` from the same folder if served over `http://` (e.g. `python -m http.server` from that folder), or use the file picker / drag-and-drop if you just double-click it directly (browsers block local-file `fetch()` for security, so double-clicking alone can't auto-load).
+
+See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` output looks like, and [samples/dashboard/](samples/dashboard/) for a ready-to-open example dashboard (search, filters, ATT&CK tagging) without running the pipeline yourself.
 
 ## Roadmap
 
@@ -87,7 +93,7 @@ See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` ou
 - [x] Timeline merge + ATT&CK tagging (`timeline/build_timeline.py`)
 - [x] Emit all MFTECmd timestamp events (created/modified/accessed/record-change)
 - [x] Per-MFT-entry timestomp detection heuristic (SI vs FN, tags `T1070.006` via `mft_timestamp_anomaly`)
-- [x] HTML timeline viewer (`timeline/render_html.py` — search, artifact filters, ATT&CK-tagged-only toggle, sortable columns)
+- [x] SQLite-backed timeline dashboard (`timeline/build_db.py` + `timeline/viewer/` — search, artifact filters, ATT&CK-tagged-only toggle, sortable columns, pagination; replaced an earlier single-file HTML viewer that embedded every row as inline JSON, which ran real collections out of browser memory)
 - [ ] Timesketch export format
 - [ ] Sample malicious dataset + walkthrough (docs/case_walkthrough.md)
 
@@ -103,4 +109,4 @@ Early build — collection, normalization, and timeline stages are scaffolded. S
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Third-party components vendored for offline use are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
