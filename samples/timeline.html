@@ -36,6 +36,13 @@
   .types { display: flex; flex-wrap: wrap; gap: 8px; }
   .types label { display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; }
   #attackOnly { display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .pagination { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .pagination button, .pagination select {
+    padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: default; }
+  #pageIndicator { color: var(--muted); font-size: 12px; padding: 0 2px; }
   #count { color: var(--muted); margin-left: auto; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; }
   thead th {
@@ -65,13 +72,24 @@
 
 <header>
   <h1>Sample Timeline — CASE-2026-014</h1>
-  <div class="meta">Generated 2026-07-15 20:57:05 UTC &middot; <span id="totalMeta">5</span> events &middot; <span id="taggedMeta">3</span> ATT&amp;CK-tagged</div>
+  <div class="meta">Generated 2026-07-16 21:20:18 UTC &middot; <span id="totalMeta">5</span> events &middot; <span id="taggedMeta">3</span> ATT&amp;CK-tagged</div>
 </header>
 
 <div class="controls">
   <input id="search" type="text" placeholder="Search timestamp, host, action, detail, source, technique...">
   <div class="types" id="typeFilters"></div>
   <label id="attackOnly"><input type="checkbox" id="attackOnlyCheckbox"> ATT&amp;CK-tagged only</label>
+  <div class="pagination">
+    <button id="prevPage" title="Previous page">&larr;</button>
+    <span id="pageIndicator"></span>
+    <button id="nextPage" title="Next page">&rarr;</button>
+    <select id="pageSize" title="Rows per page">
+      <option value="100">100/page</option>
+      <option value="200" selected>200/page</option>
+      <option value="500">500/page</option>
+      <option value="1000">1000/page</option>
+    </select>
+  </div>
   <span id="count"></span>
 </div>
 
@@ -95,7 +113,10 @@
   const DATA = [{"timestamp": "2026-07-10 08:55:12.0000000", "host": "WIN10-BOB", "artifact_type": "prefetch", "action": "process_execution", "detail": "POWERSHELL.EXE (run_count=14)", "source_file": "PECmd_Output.csv", "attack_techniques": ""}, {"timestamp": "2026-07-10 09:00:00.0000000", "host": "WIN10-BOB", "artifact_type": "mft", "action": "file_created", "detail": "C:/Users/bob/Downloads/report.docx (size=2048) [mft_timestamp_anomaly: SI=2020-01-01 00:00:00.0000000 FN=2026-07-10 09:00:00.0000000]", "source_file": "MFTECmd_$MFT_Output.csv", "attack_techniques": "T1070.006"}, {"timestamp": "2026-07-10 09:02:31.0000000", "host": "WIN10-BOB", "artifact_type": "registry", "action": "Run Key", "detail": "HKU/S-1-5-21.../Software/Microsoft/Windows/CurrentVersion/Run/Updater = C:/Users/bob/AppData/Roaming/upd.exe", "source_file": "RECmd_Batch_Output.csv", "attack_techniques": "T1547.001"}, {"timestamp": "2026-07-10 09:03:10.0000000", "host": "WIN10-BOB", "artifact_type": "event_log", "action": "event_id_4104", "detail": "PowerShell ScriptBlock: IEX (New-Object Net.WebClient).DownloadString(...)", "source_file": "EvtxECmd_Output.csv", "attack_techniques": ""}, {"timestamp": "2026-07-10 09:10:45.0000000", "host": "WIN10-BOB", "artifact_type": "event_log", "action": "event_id_4624", "detail": "logon_type_10 from 10.0.0.55 (RDP)", "source_file": "EvtxECmd_Output.csv", "attack_techniques": "T1021"}];
   const ARTIFACT_TYPES = ["event_log", "mft", "prefetch", "registry"];
 
-  const state = { search: "", types: new Set(ARTIFACT_TYPES), attackOnly: false, sortKey: "timestamp", sortDir: 1 };
+  const state = {
+    search: "", types: new Set(ARTIFACT_TYPES), attackOnly: false,
+    sortKey: "timestamp", sortDir: 1, page: 0, pageSize: 200
+  };
 
   const typeFiltersEl = document.getElementById("typeFilters");
   ARTIFACT_TYPES.forEach(t => {
@@ -104,6 +125,7 @@
     cb.type = "checkbox"; cb.checked = true; cb.dataset.type = t;
     cb.addEventListener("change", () => {
       if (cb.checked) state.types.add(t); else state.types.delete(t);
+      state.page = 0;
       render();
     });
     label.appendChild(cb);
@@ -113,6 +135,7 @@
 
   document.getElementById("attackOnlyCheckbox").addEventListener("change", (e) => {
     state.attackOnly = e.target.checked;
+    state.page = 0;
     render();
   });
 
@@ -120,7 +143,7 @@
   document.getElementById("search").addEventListener("input", (e) => {
     clearTimeout(searchTimer);
     const value = e.target.value;
-    searchTimer = setTimeout(() => { state.search = value.toLowerCase(); render(); }, 120);
+    searchTimer = setTimeout(() => { state.search = value.toLowerCase(); state.page = 0; render(); }, 120);
   });
 
   document.querySelectorAll("thead th[data-key]").forEach(th => {
@@ -129,8 +152,17 @@
       if (state.sortKey === key) { state.sortDir *= -1; } else { state.sortKey = key; state.sortDir = 1; }
       document.querySelectorAll("thead th").forEach(h => h.classList.remove("sorted"));
       th.classList.add("sorted");
+      state.page = 0;
       render();
     });
+  });
+
+  document.getElementById("prevPage").addEventListener("click", () => { state.page -= 1; render(); });
+  document.getElementById("nextPage").addEventListener("click", () => { state.page += 1; render(); });
+  document.getElementById("pageSize").addEventListener("change", (e) => {
+    state.pageSize = parseInt(e.target.value, 10);
+    state.page = 0;
+    render();
   });
 
   function escapeHtml(s) {
@@ -157,16 +189,37 @@
 
     const tbody = document.getElementById("rows");
     const empty = document.getElementById("empty");
-    document.getElementById("count").textContent = `Showing ${filtered.length} of ${DATA.length}`;
+    const prevBtn = document.getElementById("prevPage");
+    const nextBtn = document.getElementById("nextPage");
+    const pageIndicator = document.getElementById("pageIndicator");
 
     if (filtered.length === 0) {
       tbody.innerHTML = "";
       empty.style.display = "block";
+      document.getElementById("count").textContent = `Showing 0 of ${DATA.length}`;
+      pageIndicator.textContent = "Page 0 of 0";
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
       return;
     }
     empty.style.display = "none";
 
-    tbody.innerHTML = filtered.map(row => {
+    // Only the current page's rows are ever built and inserted into the
+    // DOM — a real timeline can have tens or hundreds of thousands of
+    // rows (a single MFT can produce that many on its own), and building
+    // one giant <tbody> for all of them is what crashes the tab.
+    const pageCount = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+    state.page = Math.min(Math.max(state.page, 0), pageCount - 1);
+    const start = state.page * state.pageSize;
+    const pageRows = filtered.slice(start, start + state.pageSize);
+
+    document.getElementById("count").textContent =
+      `Rows ${start + 1}-${start + pageRows.length} of ${filtered.length} (${DATA.length} total)`;
+    pageIndicator.textContent = `Page ${state.page + 1} of ${pageCount}`;
+    prevBtn.disabled = state.page === 0;
+    nextBtn.disabled = state.page >= pageCount - 1;
+
+    tbody.innerHTML = pageRows.map(row => {
       const techniques = row.attack_techniques
         ? row.attack_techniques.split(";").filter(Boolean).map(t => `<span class="badge">${escapeHtml(t)}</span>`).join("")
         : "";

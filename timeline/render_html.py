@@ -5,7 +5,11 @@ Renders a timeline CSV (see build_timeline.py) into a single self-contained
 HTML file for standalone review — no server, no external assets, safe to
 hand off or open on an air-gapped analysis box. Supports free-text search,
 artifact-type filtering, an ATT&CK-tagged-only toggle, and click-to-sort
-columns, all client-side over the embedded row data.
+columns, all client-side over the embedded row data. The table is paginated
+client-side (only the current page's rows ever hit the DOM) so real
+timelines with tens or hundreds of thousands of rows — a single MFT can
+produce that many on its own — don't crash the browser tab trying to
+render one giant table.
 
 Usage:
     python render_html.py --input timeline.csv --output timeline.html
@@ -90,6 +94,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   .types {{ display: flex; flex-wrap: wrap; gap: 8px; }}
   .types label {{ display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; }}
   #attackOnly {{ display: flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; white-space: nowrap; }}
+  .pagination {{ display: flex; align-items: center; gap: 6px; white-space: nowrap; }}
+  .pagination button, .pagination select {{
+    padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 12px; cursor: pointer;
+  }}
+  .pagination button:disabled {{ opacity: 0.4; cursor: default; }}
+  #pageIndicator {{ color: var(--muted); font-size: 12px; padding: 0 2px; }}
   #count {{ color: var(--muted); margin-left: auto; white-space: nowrap; }}
   table {{ width: 100%; border-collapse: collapse; }}
   thead th {{
@@ -126,6 +137,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <input id="search" type="text" placeholder="Search timestamp, host, action, detail, source, technique...">
   <div class="types" id="typeFilters"></div>
   <label id="attackOnly"><input type="checkbox" id="attackOnlyCheckbox"> ATT&amp;CK-tagged only</label>
+  <div class="pagination">
+    <button id="prevPage" title="Previous page">&larr;</button>
+    <span id="pageIndicator"></span>
+    <button id="nextPage" title="Next page">&rarr;</button>
+    <select id="pageSize" title="Rows per page">
+      <option value="100">100/page</option>
+      <option value="200" selected>200/page</option>
+      <option value="500">500/page</option>
+      <option value="1000">1000/page</option>
+    </select>
+  </div>
   <span id="count"></span>
 </div>
 
@@ -149,7 +171,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   const DATA = {data_json};
   const ARTIFACT_TYPES = {artifact_types_json};
 
-  const state = {{ search: "", types: new Set(ARTIFACT_TYPES), attackOnly: false, sortKey: "timestamp", sortDir: 1 }};
+  const state = {{
+    search: "", types: new Set(ARTIFACT_TYPES), attackOnly: false,
+    sortKey: "timestamp", sortDir: 1, page: 0, pageSize: 200
+  }};
 
   const typeFiltersEl = document.getElementById("typeFilters");
   ARTIFACT_TYPES.forEach(t => {{
@@ -158,6 +183,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     cb.type = "checkbox"; cb.checked = true; cb.dataset.type = t;
     cb.addEventListener("change", () => {{
       if (cb.checked) state.types.add(t); else state.types.delete(t);
+      state.page = 0;
       render();
     }});
     label.appendChild(cb);
@@ -167,6 +193,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   document.getElementById("attackOnlyCheckbox").addEventListener("change", (e) => {{
     state.attackOnly = e.target.checked;
+    state.page = 0;
     render();
   }});
 
@@ -174,7 +201,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   document.getElementById("search").addEventListener("input", (e) => {{
     clearTimeout(searchTimer);
     const value = e.target.value;
-    searchTimer = setTimeout(() => {{ state.search = value.toLowerCase(); render(); }}, 120);
+    searchTimer = setTimeout(() => {{ state.search = value.toLowerCase(); state.page = 0; render(); }}, 120);
   }});
 
   document.querySelectorAll("thead th[data-key]").forEach(th => {{
@@ -183,8 +210,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (state.sortKey === key) {{ state.sortDir *= -1; }} else {{ state.sortKey = key; state.sortDir = 1; }}
       document.querySelectorAll("thead th").forEach(h => h.classList.remove("sorted"));
       th.classList.add("sorted");
+      state.page = 0;
       render();
     }});
+  }});
+
+  document.getElementById("prevPage").addEventListener("click", () => {{ state.page -= 1; render(); }});
+  document.getElementById("nextPage").addEventListener("click", () => {{ state.page += 1; render(); }});
+  document.getElementById("pageSize").addEventListener("change", (e) => {{
+    state.pageSize = parseInt(e.target.value, 10);
+    state.page = 0;
+    render();
   }});
 
   function escapeHtml(s) {{
@@ -211,16 +247,37 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     const tbody = document.getElementById("rows");
     const empty = document.getElementById("empty");
-    document.getElementById("count").textContent = `Showing ${{filtered.length}} of ${{DATA.length}}`;
+    const prevBtn = document.getElementById("prevPage");
+    const nextBtn = document.getElementById("nextPage");
+    const pageIndicator = document.getElementById("pageIndicator");
 
     if (filtered.length === 0) {{
       tbody.innerHTML = "";
       empty.style.display = "block";
+      document.getElementById("count").textContent = `Showing 0 of ${{DATA.length}}`;
+      pageIndicator.textContent = "Page 0 of 0";
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
       return;
     }}
     empty.style.display = "none";
 
-    tbody.innerHTML = filtered.map(row => {{
+    // Only the current page's rows are ever built and inserted into the
+    // DOM — a real timeline can have tens or hundreds of thousands of
+    // rows (a single MFT can produce that many on its own), and building
+    // one giant <tbody> for all of them is what crashes the tab.
+    const pageCount = Math.max(1, Math.ceil(filtered.length / state.pageSize));
+    state.page = Math.min(Math.max(state.page, 0), pageCount - 1);
+    const start = state.page * state.pageSize;
+    const pageRows = filtered.slice(start, start + state.pageSize);
+
+    document.getElementById("count").textContent =
+      `Rows ${{start + 1}}-${{start + pageRows.length}} of ${{filtered.length}} (${{DATA.length}} total)`;
+    pageIndicator.textContent = `Page ${{state.page + 1}} of ${{pageCount}}`;
+    prevBtn.disabled = state.page === 0;
+    nextBtn.disabled = state.page >= pageCount - 1;
+
+    tbody.innerHTML = pageRows.map(row => {{
       const techniques = row.attack_techniques
         ? row.attack_techniques.split(";").filter(Boolean).map(t => `<span class="badge">${{escapeHtml(t)}}</span>`).join("")
         : "";
