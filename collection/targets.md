@@ -49,6 +49,39 @@ kape.exe --tsource <SourceDrive> --tdest <TargetDestination> `
 Both the target list and module list are override-able via `run_kape.ps1
 -Targets` / `-Modules` for scoped, one-off collections (e.g. registry-only).
 
+## Curated set vs. a KAPE compound target
+
+`run_kape.ps1` can run in one of two target modes:
+
+- **Curated (default)** — the scoped 7-target set above, chosen to feed
+  exactly the artifact types `parsers/normalize_kape.py` knows how to
+  normalize. Fast, predictable output size, and everything collected ends
+  up in the timeline.
+- **KAPE compound target** (`-CompoundTarget <name>`) — hands off target
+  selection to one of KAPE's own built-in `!`-prefixed presets instead,
+  e.g. `-CompoundTarget SANS_Triage` (equivalent to `--target
+  !SANS_Triage`). Compound targets bundle many more individual targets
+  than this repo's curated set — broader coverage, but slower collection
+  and more raw output that `normalize_kape.py` won't recognize (it skips
+  any CSV whose header schema it doesn't match, so unmapped modules'
+  output is simply left as raw KAPE/EZ Tools CSVs alongside the
+  timeline rather than causing an error).
+
+Popular built-in compound targets (exact set depends on your installed
+KAPE version — run `kape.exe --tlist` to see what's actually available):
+
+| Compound target | What it is |
+|---|---|
+| `!SANS_Triage` | SANS' community-maintained broad triage collection |
+| `!BasicCollection` | KAPE's own general-purpose baseline collection |
+
+`-Modules` still applies on top of a compound target — it doesn't need to
+change, since modules only process the artifact types they match.
+
+Use the curated set for fast, scoped IR triage where you already know
+what you're looking for; reach for a compound target when you want KAPE's
+broader standard preset instead, e.g. an unfamiliar host or a second pass.
+
 ## Adding a target or module
 
 1. Confirm the KAPE target/module name via `kape.exe --tlist` / `--mlist`.

@@ -32,11 +32,26 @@
 
 .PARAMETER Targets
     Comma-separated list of KAPE !Targets to collect. Defaults to the
-    IR triage set documented in targets.md.
+    IR triage set documented in targets.md. Ignored if -CompoundTarget is
+    specified.
+
+.PARAMETER CompoundTarget
+    Name of a KAPE built-in compound target to collect instead of the
+    curated -Targets list (e.g. "SANS_Triage", "BasicCollection" — the
+    leading "!" KAPE uses for compound targets is optional here, added
+    automatically). Compound targets bundle many individual targets into
+    one broad, community-maintained collection; use this when you want
+    KAPE's standard preset instead of this repo's scoped IR triage set.
+    See collection/targets.md for more on when to prefer one over the
+    other, and run `kape.exe --tlist` to see what's available on your
+    KAPE install (bundled compound targets vary by version).
 
 .PARAMETER Modules
     Comma-separated list of KAPE !Modules to run against the collected
-    targets. Defaults to the set documented in targets.md.
+    targets. Defaults to the set documented in targets.md. Still applies
+    when -CompoundTarget is used — modules only process the artifact
+    types they match, so anything the compound target collects outside
+    this repo's normalized artifact types is left as raw KAPE output.
 
 .PARAMETER KapePath
     Path to kape.exe. Defaults to "kape.exe", resolved via PATH.
@@ -50,6 +65,10 @@
 .EXAMPLE
     .\run_kape.ps1 -SourceDrive E: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
         -CaseName CASE-2026-014 -Targets RegistryHives,EventLogs -Modules RECmd,EvtxECmd
+
+.EXAMPLE
+    .\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed `
+        -CompoundTarget SANS_Triage
 
 .EXAMPLE
     .\run_kape.ps1 --help
@@ -83,6 +102,8 @@ param(
         "Amcache",
         "LNKFilesAndFolders"
     ),
+
+    [string]$CompoundTarget,
 
     [string[]]$Modules = @(
         "MFTECmd",
@@ -144,7 +165,16 @@ $mdest = Join-Path $ModuleDestination $runName
 New-Item -ItemType Directory -Path $tdest -Force | Out-Null
 New-Item -ItemType Directory -Path $mdest -Force | Out-Null
 
-$targetList = $Targets -join ","
+if ($CompoundTarget) {
+    if ($PSBoundParameters.ContainsKey("Targets")) {
+        Write-Host "Both -CompoundTarget and -Targets were specified; -CompoundTarget takes precedence and -Targets is ignored." -ForegroundColor Yellow
+    }
+    $targetList = "!" + $CompoundTarget.TrimStart("!")
+    $targetMode = "KAPE compound target"
+} else {
+    $targetList = $Targets -join ","
+    $targetMode = "curated IR triage set"
+}
 $moduleList = $Modules -join ","
 
 $kapeArgs = @(
@@ -158,6 +188,7 @@ $kapeArgs = @(
 
 Write-Host "KAPE binary   : $kapeExe"
 Write-Host "Source        : $SourceDrive"
+Write-Host "Target mode   : $targetMode"
 Write-Host "Targets       : $targetList"
 Write-Host "Modules       : $moduleList"
 Write-Host "Target output : $tdest"

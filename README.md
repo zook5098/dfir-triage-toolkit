@@ -52,6 +52,9 @@ pip install -r requirements.txt
 # Collect with KAPE (targets + modules in one pass)
 .\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed
 
+# ...or collect with a KAPE built-in compound target instead of the curated set
+.\collection\run_kape.ps1 -SourceDrive C: -TargetDestination D:\triage\raw -ModuleDestination D:\triage\parsed -CompoundTarget SANS_Triage
+
 # Full usage, no need to open this README or targets.md
 .\collection\run_kape.ps1 --help
 
