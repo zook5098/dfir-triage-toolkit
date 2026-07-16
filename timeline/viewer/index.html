@@ -3,7 +3,25 @@
 <head>
 <meta charset="utf-8">
 <title>DFIR Timeline Dashboard</title>
-<script src="./sql-wasm.js"></script>
+<!--
+  This file is a template. build_db.py replaces the two placeholders below
+  (the sql.js library source and the base64-encoded sql-wasm.wasm binary)
+  with the real content and writes the result as the actual index.html
+  next to timeline.db. Opening this template file directly won't work.
+
+  Both are inlined -- rather than loaded via separate <script src> /
+  locateFile() fetches -- because sql.js's normal WASM loader tries fetch()
+  and falls back to synchronous XHR, and modern Chromium blocks *both* for
+  file:// origins ("both async and sync fetching of the wasm failed").
+  Inlining means the SQLite engine never needs to fetch anything to start,
+  so it works identically whether index.html is opened directly or served.
+-->
+<script>
+/*__SQL_WASM_JS__*/
+</script>
+<script>
+  const SQL_WASM_BASE64 = "__SQL_WASM_BASE64__";
+</script>
 <style>
   :root {
     --bg: #f7f7f8; --panel: #ffffff; --text: #1a1a1a; --muted: #6b7280;
@@ -34,6 +52,11 @@
     color: var(--muted); font-size: 13px;
   }
   #dropZone.dragover { border-color: var(--accent); color: var(--accent); }
+  #loadFailure {
+    display: none; margin-top: 16px; padding: 12px 14px; text-align: left;
+    background: var(--tag-bg); color: var(--tag-text); border-radius: 8px;
+    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+  }
   #fileInput { margin-top: 4px; }
 
   .controls {
@@ -94,6 +117,7 @@
     <input type="file" id="fileInput" accept=".db,.sqlite,.sqlite3">
     <div id="dropZone">or drag &amp; drop the .db file here</div>
   </div>
+  <div id="loadFailure"></div>
 </div>
 
 <div id="dashboard">
@@ -171,31 +195,115 @@
     }
   }
 
+  function base64ToUint8Array(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
   async function init() {
-    SQL = await initSqlJs({ locateFile: file => "./" + file });
+    try {
+      // Passing the WASM bytes directly (rather than locateFile, which
+      // triggers sql.js's internal fetch()/XHR loader) is what lets this
+      // work under file:// -- see the comment on the placeholders above.
+      SQL = await initSqlJs({ wasmBinary: base64ToUint8Array(SQL_WASM_BASE64) });
+    } catch (e) {
+      document.getElementById("loadError").style.display = "block";
+      showLoadFailure(
+        `Failed to initialize the SQLite engine (sql.js/WebAssembly).\n` +
+        `Error: ${e.message || e}\n\nYour browser may not support WebAssembly, or this file was ` +
+        `opened without being processed by build_db.py (the embedded sql.js placeholders are ` +
+        `only filled in at export time).`
+      );
+      return;
+    }
     try {
       const resp = await fetch("./timeline.db");
       if (!resp.ok) throw new Error("timeline.db not found (" + resp.status + ")");
       const buf = await resp.arrayBuffer();
-      loadDb(new Uint8Array(buf));
+      loadDb(new Uint8Array(buf), "timeline.db");
     } catch (e) {
       document.getElementById("loadError").style.display = "block";
     }
   }
 
-  function loadDb(bytes) {
-    db = new SQL.Database(bytes);
-    document.getElementById("loadScreen").style.display = "none";
-    document.getElementById("dashboard").style.display = "block";
-    setupDashboard();
+  function showLoadFailure(message) {
+    const el = document.getElementById("loadFailure");
+    el.textContent = message;
+    el.style.display = "block";
+  }
+
+  function loadDb(bytes, sourceLabel) {
+    let database;
+    try {
+      database = new SQL.Database(bytes);
+    } catch (e) {
+      showLoadFailure(
+        `Failed to open ${sourceLabel} as a SQLite database (${bytes.length.toLocaleString()} bytes).\n` +
+        `Error: ${e.message || e}\n\n` +
+        `This usually means the file is corrupted/truncated, isn't actually a .db produced by ` +
+        `build_db.py, or (for very large files) the browser ran out of memory loading it. ` +
+        `Check the file's size and that it opens fine with a normal SQLite tool.`
+      );
+      return;
+    }
+    // setupDashboard() runs before swapping visibility, so the loadScreen
+    // (and #loadFailure, a child of it) is still on-screen to report a
+    // failure here -- a swap-then-run ordering would hide the very panel
+    // needed to show that error.
+    try {
+      db = database;
+      setupDashboard();
+      document.getElementById("loadScreen").style.display = "none";
+      document.getElementById("dashboard").style.display = "block";
+    } catch (e) {
+      showLoadFailure(`${sourceLabel} opened, but the dashboard failed to initialize.\nError: ${e.message || e}`);
+    }
+  }
+
+  const READ_CHUNK_BYTES = 200 * 1024 * 1024; // 200MB
+
+  async function readFile(file) {
+    document.getElementById("loadFailure").style.display = "none";
+
+    let bytes;
+    try {
+      bytes = new Uint8Array(file.size);
+    } catch (e) {
+      showLoadFailure(
+        `${file.name} is too large to load in this browser ` +
+        `(${(file.size / (1024 * 1024)).toLocaleString()} MB).\nError: ${e.message || e}\n\n` +
+        `This dashboard loads the whole database into browser memory, which has a hard ceiling ` +
+        `(commonly around 2GB, independent of how much RAM the machine has). A database this ` +
+        `large needs a different, streaming-capable viewer -- there's no workaround here.`
+      );
+      return;
+    }
+
+    // Read in chunks rather than one file.arrayBuffer()/FileReader call on
+    // the whole file -- Chromium throws NotReadableError reading a single
+    // Blob/File above roughly 1-1.5GB in one call, even though reading the
+    // same data in smaller slices and reassembling it works fine.
+    try {
+      let offset = 0;
+      while (offset < file.size) {
+        const end = Math.min(offset + READ_CHUNK_BYTES, file.size);
+        const chunk = await file.slice(offset, end).arrayBuffer();
+        bytes.set(new Uint8Array(chunk), offset);
+        offset = end;
+      }
+    } catch (e) {
+      showLoadFailure(`Failed to read ${file.name}: ${e.message || e}`);
+      return;
+    }
+
+    loadDb(bytes, file.name);
   }
 
   document.getElementById("fileInput").addEventListener("change", (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => loadDb(new Uint8Array(reader.result));
-    reader.readAsArrayBuffer(file);
+    if (file) readFile(file);
   });
 
   const dropZone = document.getElementById("dropZone");
@@ -205,10 +313,7 @@
     e.preventDefault();
     dropZone.classList.remove("dragover");
     const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => loadDb(new Uint8Array(reader.result));
-    reader.readAsArrayBuffer(file);
+    if (file) readFile(file);
   });
 
   function setupDashboard() {

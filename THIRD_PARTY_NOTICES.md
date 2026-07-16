@@ -14,8 +14,12 @@ dependency at runtime.
   (jsDelivr mirrors the published npm package; not modified after download)
 - **License**: MIT
 - **Files**: `timeline/viewer/sql-wasm.js`, `timeline/viewer/sql-wasm.wasm`
-  (copied verbatim into every `build_db.py` output folder alongside the
-  generated `.db` and `index.html`)
+  are the pristine vendored source. `build_db.py` inlines both directly
+  into the generated `index.html` (the JS as-is; the WASM base64-encoded)
+  rather than shipping them as separate files, so each dashboard output
+  is exactly two files (`timeline.db` + `index.html`) and the SQLite
+  engine never needs to fetch anything to start, which also avoids a
+  `file://`-origin restriction in Chromium (see README's Dashboard notes).
 
 To update: download the new version's `dist/sql-wasm.js` and
 `dist/sql-wasm.wasm` from the same jsDelivr path with the new version

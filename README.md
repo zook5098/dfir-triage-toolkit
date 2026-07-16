@@ -18,11 +18,13 @@ parsers/      -> normalize_kape.py reads KAPE's EZ Tools output CSVs (MFTECmd, P
                  into a common schema
 timeline/     -> build_timeline.py merges normalized records, tags rows with ATT&CK
                  techniques per docs/attack_mapping.yaml, and outputs a sorted timeline
-                 build_db.py exports that timeline into a SQLite .db + copies the
-                 static dashboard (viewer/) alongside it into one output folder
-                 viewer/ is the dashboard itself: index.html + vendored sql.js
-                 (SQLite-in-WASM) run real indexed queries against the .db client-side,
-                 so review scales to however large a real timeline gets
+                 build_db.py exports that timeline into exactly two output files:
+                 timeline.db and a self-contained index.html dashboard (sql.js and its
+                 WASM binary are inlined into it, so nothing else needs to travel with it)
+                 viewer/ is the index.html template + vendored sql.js (SQLite-in-WASM)
+                 that build_db.py renders from -- the dashboard runs real indexed SQL
+                 queries against the .db client-side, so review scales to however
+                 large a real timeline gets
 samples/      -> timeline.csv + dashboard/ show what a built timeline and its
                  exported dashboard look like end to end
 docs/         -> methodology notes, ATT&CK mapping
@@ -44,7 +46,7 @@ docs/         -> methodology notes, ATT&CK mapping
 1. **Collect** — `collection/run_kape.ps1` invokes KAPE (assumed installed and on PATH) against a live host or mounted image, collecting the Targets in `collection/targets.md` and running the matching EZ Tools Modules against them in a single pass.
 2. **Normalize** — `parsers/normalize_kape.py` reads every module's CSV output and normalizes it into a common schema: `timestamp, host, artifact_type, action, detail, source_file`.
 3. **Timeline** — `timeline/build_timeline.py` merges all normalized records, sorts by timestamp, and tags entries with likely ATT&CK techniques based on pattern rules in `docs/attack_mapping.yaml`.
-4. **Review** — `timeline/build_db.py` exports the timeline CSV into a SQLite database and copies the static dashboard (`timeline/viewer/`) alongside it, producing one self-contained folder to hand off. The dashboard (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns, pagination) runs real SQL queries against the `.db` client-side via a vendored copy of [sql.js](https://github.com/sql-js/sql.js) — no server required, and only the current page of results is ever loaded into the browser, so it scales to real timelines with hundreds of thousands of rows. Or import the CSV into Timesketch directly.
+4. **Review** — `timeline/build_db.py` exports the timeline CSV into a SQLite database and renders a matching `index.html` dashboard — sql.js (SQLite compiled to WebAssembly) is inlined directly into that HTML, so the two output files (`timeline.db` + `index.html`) are all that's needed, no server required and no separate files to keep track of. The dashboard (search, artifact-type filters, ATT&CK-tagged-only toggle, click-to-sort columns, pagination) runs real SQL queries against the `.db` client-side, and only the current page of results is ever loaded into the browser, so it scales to real timelines with hundreds of thousands of rows. See [Dashboard notes](#dashboard-notes) below for a practical size ceiling. Or import the CSV into Timesketch directly.
 
 ## Quick start
 
@@ -82,9 +84,14 @@ python timeline/build_timeline.py --input ./case001/normalized.csv --output ./ca
 python timeline/build_db.py --input ./case001/timeline.csv --output ./case001/dashboard --title "CASE001"
 ```
 
-Open `./case001/dashboard/index.html` in a browser — it auto-loads `timeline.db` from the same folder if served over `http://` (e.g. `python -m http.server` from that folder), or use the file picker / drag-and-drop if you just double-click it directly (browsers block local-file `fetch()` for security, so double-clicking alone can't auto-load).
+Open `./case001/dashboard/index.html` directly (double-click) and use the file picker or drag-and-drop to load `timeline.db` from the same folder — or serve the folder over `http://` (e.g. `python -m http.server` from inside it) to have it auto-load `timeline.db` with no manual step. Both work; serving just skips the one click. (Browsers block a page from `fetch()`-ing local files under `file://`, which is why double-clicking can't auto-load — but everything else, including the SQLite engine itself, works identically either way.)
 
 See [samples/timeline.csv](samples/timeline.csv) for what `build_timeline.py` output looks like, and [samples/dashboard/](samples/dashboard/) for a ready-to-open example dashboard (search, filters, ATT&CK tagging) without running the pipeline yourself.
+
+### Dashboard notes
+
+- **Opening directly (double-click) fully works** — sql.js's SQLite/WebAssembly engine is inlined into `index.html` itself specifically so it never needs to fetch anything to start, which sidesteps a real Chromium restriction (`file://` pages can't `fetch()` even their own bundled `.wasm` file).
+- **Practical size ceiling**: the dashboard loads the whole `.db` into browser memory (indexed SQL queries run against it client-side, but the file itself is read in full). In testing, the browser's own file-reading APIs throw past roughly 1.5GB read as a single chunk — worked around here by reading large files in slices — and allocating one contiguous in-memory buffer above roughly 2GB fails outright regardless. For a `timeline.db` past that range, the dashboard will show a clear error rather than hang or silently fail, but there's currently no workaround short of a different (streaming) viewer design. If your case is trending that large, consider a narrower `-Targets`/`-Modules` collection scope (see [collection/targets.md](collection/targets.md)) to keep the timeline itself smaller.
 
 ## Roadmap
 
